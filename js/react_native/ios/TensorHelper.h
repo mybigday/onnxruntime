@@ -5,6 +5,7 @@
 #define TensorHelper_h
 
 #import <Foundation/Foundation.h>
+#import <jsi/jsi.h>
 
 // Note: Using below syntax for including ort c api and ort extensions headers to resolve a compiling error happened
 // in an expo react native ios app (a redefinition error happened with multiple object types defined within
@@ -34,6 +35,11 @@ FOUNDATION_EXPORT NSString* const JsTensorTypeFloat;
 FOUNDATION_EXPORT NSString* const JsTensorTypeDouble;
 FOUNDATION_EXPORT NSString* const JsTensorTypeString;
 
++ (Ort::Value)createInputTensorJSI:(facebook::jsi::Runtime &)runtime
+                   input:(const facebook::jsi::Object *)input
+                   ortAllocator:(OrtAllocator *)ortAllocator
+                    allocations:(std::vector<Ort::MemoryAllocation> &)allocatons;
+
 /**
  * It creates an input tensor from a map passed by react native js.
  * 'data' must be a string type as data is encoded as base64. It first decodes it and creates a tensor.
@@ -41,6 +47,10 @@ FOUNDATION_EXPORT NSString* const JsTensorTypeString;
 +(Ort::Value)createInputTensor:(NSDictionary*)input
                   ortAllocator:(OrtAllocator*)ortAllocator
                    allocations:(std::vector<Ort::MemoryAllocation>&)allocatons;
+
++(facebook::jsi::Object)createOutputTensorJSI:(facebook::jsi::Runtime &)runtime
+                            outputNames:(const std::vector<const char*>&)outputNames
+                            values:(const std::vector<Ort::Value>&)values;
 
 /**
  * It creates an output map from an output tensor.

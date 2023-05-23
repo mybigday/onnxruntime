@@ -6,6 +6,8 @@
 
 #import <Foundation/Foundation.h>
 #import <React/RCTLog.h>
+#import <React/RCTBridge+Private.h>
+#import <jsi/jsi.h>
 
 // Note: Using below syntax for including ort c api and ort extensions headers to resolve a compiling error happened
 // in an expo react native ios app when ort extensions enabled (a redefinition error of multiple object types defined
@@ -343,6 +345,94 @@ static NSDictionary *executionModeTable = @{@"sequential" : @(ORT_SEQUENTIAL), @
     delete sessionInfo;
     sessionInfo = nullptr;
   }
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install)
+{
+  NSLog(@"Installing ONNXRuntime Bindings...");
+  RCTBridge* bridge = [RCTBridge currentBridge];
+  RCTCxxBridge* cxxBridge = (RCTCxxBridge*)bridge;
+  if (cxxBridge == nil) {
+    return @false;
+  }
+
+  using namespace facebook;
+
+  auto jsiRuntime = (jsi::Runtime*) cxxBridge.runtime;
+  if (jsiRuntime == nil) {
+    return @false;
+  }
+
+  auto& runtime = *jsiRuntime;
+
+  auto inferenceRun = jsi::Function::createFromHostFunction(runtime,
+    jsi::PropNameID::forAscii(runtime, "onnxruntimeSessionRun"),
+    4,
+    [](jsi::Runtime& runtime, const jsi::Value& thisValue, const jsi::Value* args, size_t count) -> jsi::Value {
+      if (count != 4) {
+        throw jsi::JSError(runtime, "onnxruntimeSessionRun: Invalid number of args");
+      }
+
+      auto url = args[0].getString(runtime).utf8(runtime);
+      auto input = args[1].asObject(runtime);
+      auto output = args[2].asObject(runtime).asArray(runtime);
+      auto options = args[3].asObject(runtime);
+
+      NSString *urlString = [NSString stringWithUTF8String:url.c_str()];
+      NSValue *value = [sessionMap objectForKey:urlString];
+      if (value == nil) {
+        throw jsi::JSError(runtime, "onnxruntimeSessionRun: can't find onnxruntime session");
+      }
+      SessionInfo *sessionInfo = (SessionInfo *)[value pointerValue];
+
+      std::vector<Ort::Value> feeds;
+      std::vector<Ort::MemoryAllocation> allocations;
+      feeds.reserve(sessionInfo->inputNames.size());
+      for (auto inputName : sessionInfo->inputNames) {
+        auto inputTensorProp = input.getProperty(runtime, inputName);
+        if (inputTensorProp.isUndefined()) {
+          throw jsi::JSError(runtime, "onnxInferenceRun: Invalid input tensor");
+        }
+        auto inputTensor = inputTensorProp.asObject(runtime);
+
+        Ort::Value value = [TensorHelper createInputTensorJSI:runtime input:&inputTensor ortAllocator:ortAllocator allocations:allocations];
+        feeds.emplace_back(std::move(value));
+      }
+
+      std::vector<const char *> requestedOutputs;
+      long outputCount = output.size(runtime);
+      requestedOutputs.reserve(outputCount);
+      for (int i = 0; i < outputCount; i++) {
+        auto outputName = output.getValueAtIndex(runtime, i).asString(runtime).utf8(runtime);
+        NSString *outputNameString = [NSString stringWithUTF8String:outputName.c_str()];
+        requestedOutputs.emplace_back([outputNameString UTF8String]);
+      }
+
+      // Parse run options
+      Ort::RunOptions runOptions;
+      if (options.hasProperty(runtime, "logSeverityLevel")) {
+        int logSeverityLevel = options.getProperty(runtime, "logSeverityLevel").asNumber();
+        runOptions.SetRunLogSeverityLevel(logSeverityLevel);
+      }
+      if (options.hasProperty(runtime, "tag")) {
+        auto tag = options.getProperty(runtime, "tag").asString(runtime).utf8(runtime);
+        runOptions.SetRunTag(tag.c_str());
+      }
+
+      auto result =
+          sessionInfo->session->Run(runOptions, sessionInfo->inputNames.data(), feeds.data(),
+                                    sessionInfo->inputNames.size(), requestedOutputs.data(), requestedOutputs.size());
+
+      facebook::jsi::Object resultMap = [TensorHelper createOutputTensorJSI:runtime outputNames:requestedOutputs values:result];
+
+      return resultMap;
+    }
+  );
+
+  runtime.global().setProperty(runtime, "__onnxruntimeSessionRun", std::move(inferenceRun));
+
+  NSLog(@"Installed ONNXRuntime Bindings!");
+  return @true;
 }
 
 @end

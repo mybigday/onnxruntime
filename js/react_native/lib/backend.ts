@@ -107,9 +107,17 @@ class OnnxruntimeSessionHandler implements SessionHandler {
         outputNames.push(name);
       }
     }
+    let t0 = performance.now()
     const input = this.encodeFeedsType(feeds);
-    const results: Binding.ReturnType = await this.#inferenceSession.run(this.#key, input, outputNames, options);
+    // const results: Binding.ReturnType = await this.#inferenceSession.run(this.#key, input, outputNames, options)
+    console.log('input', performance.now() - t0)
+    t0 = performance.now()
+    const results: Binding.ReturnType = await global.__onnxruntimeSessionRun(this.#key, input, outputNames, options);
+    console.log('run', performance.now() - t0)
+    t0 = performance.now()
     const output = this.decodeReturnType(results);
+    console.log('output', performance.now() - t0)
+    t0 = performance.now()
     return output;
   }
 
@@ -122,13 +130,15 @@ class OnnxruntimeSessionHandler implements SessionHandler {
         if (Array.isArray(feeds[key].data)) {
           data = feeds[key].data as string[];
         } else {
-          // Base64-encode tensor data
           const buffer = (feeds[key].data as SupportedTypedArray).buffer;
-          data = Buffer.from(buffer, 0, buffer.byteLength).toString('base64');
+          // Base64-encode tensor data
+          // data = Buffer.from(buffer, 0, buffer.byteLength).toString('base64');
+          data = buffer
         }
 
         returnValue[key] = {
-          dims: feeds[key].dims,
+          // dims: feeds[key].dims,
+          dims: feeds[key].dims.map(dim => String(dim)),
           type: feeds[key].type,
           data,
         };
@@ -146,12 +156,13 @@ class OnnxruntimeSessionHandler implements SessionHandler {
         if (Array.isArray(results[key].data)) {
           tensorData = results[key].data as string[];
         } else {
-          const buffer: Buffer = Buffer.from(results[key].data as string, 'base64');
+          // const buffer: Buffer = Buffer.from(results[key].data as string, 'base64');
+          const buffer: Buffer = Buffer.from(results[key].data)
           const typedArray = tensorTypeToTypedArray(results[key].type as Tensor.Type);
           tensorData = new typedArray(buffer.buffer, buffer.byteOffset, buffer.length / typedArray.BYTES_PER_ELEMENT);
         }
 
-        returnValue[key] = new Tensor(results[key].type as Tensor.Type, tensorData, results[key].dims);
+        returnValue[key] = new Tensor(results[key].type as Tensor.Type, tensorData, results[key].dims.map(dim => Number(dim)));
       }
     }
 

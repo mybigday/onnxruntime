@@ -3,6 +3,7 @@
 
 #import "TensorHelper.h"
 #import <Foundation/Foundation.h>
+#import <jsi/jsi.h>
 
 @implementation TensorHelper
 
@@ -18,6 +19,7 @@ NSString *const JsTensorTypeLong = @"int64";
 NSString *const JsTensorTypeFloat = @"float32";
 NSString *const JsTensorTypeDouble = @"float64";
 NSString *const JsTensorTypeString = @"string";
+
 
 /**
  * It creates an input tensor from a map passed by react native js.
@@ -53,6 +55,61 @@ NSString *const JsTensorTypeString = @"string";
     Ort::Value inputTensor = [self createInputTensor:tensorType
                                                 dims:dims
                                               buffer:buffer
+                                        ortAllocator:ortAllocator
+                                         allocations:allocatons];
+    return inputTensor;
+  }
+}
+
+// copy createInputTensor but with jsi input
+/**
+ * It creates an input tensor from a map passed by react native js.
+ * 'data' must be a string type as data is encoded as base64. It first decodes it and creates a tensor.
+ */
++ (Ort::Value)createInputTensorJSI:(facebook::jsi::Runtime &)runtime
+                   input:(const facebook::jsi::Object *)input
+                   ortAllocator:(OrtAllocator *)ortAllocator
+                    allocations:(std::vector<Ort::MemoryAllocation> &)allocatons {
+
+  // shape
+  facebook::jsi::Array dimsArray = input->getProperty(runtime, "dims").asObject(runtime).asArray(runtime);
+  std::vector<int64_t> dims;
+  dims.reserve(dimsArray.size(runtime));
+  for (size_t i = 0; i < dimsArray.size(runtime); i++) {
+    auto dim = dimsArray.getValueAtIndex(runtime, i).asString(runtime).utf8(runtime);
+    dims.emplace_back(std::stoll(dim));
+  }
+
+  // type
+  auto type = input->getProperty(runtime, "type").asString(runtime).utf8(runtime);
+  NSString *typeString = [NSString stringWithUTF8String:type.c_str()];
+  ONNXTensorElementDataType tensorType = [self getOnnxTensorType:typeString];
+
+  // data
+  if (tensorType == ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING) {
+    facebook::jsi::Array values = input->getProperty(runtime, "data").asObject(runtime).asArray(runtime);
+    auto inputTensor =
+        Ort::Value::CreateTensor(ortAllocator, dims.data(), dims.size(), ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING);
+    size_t index = 0;
+    for (size_t i = 0; i < values.size(runtime); i++) {
+      auto value = values.getValueAtIndex(runtime, i).asString(runtime).utf8(runtime);
+      inputTensor.FillStringTensorElement(value.c_str(), index++);
+    }
+    return inputTensor;
+  } else {
+    // data change to array buffer
+    auto obj = input->getProperty(runtime, "data").asObject(runtime);
+    if (!obj.isArrayBuffer(runtime)) {
+      throw facebook::jsi::JSError(runtime, "data must be an ArrayBuffer");
+    }
+    facebook::jsi::ArrayBuffer buffer = obj.getArrayBuffer(runtime);
+    // if (buffer.size(runtime) == 0) {
+    //   throw facebook::jsi::JSError(runtime, "data must not be empty");
+    // }
+    NSData *bufferData = [NSData dataWithBytesNoCopy:buffer.data(runtime) length:buffer.size(runtime) freeWhenDone:NO];
+    Ort::Value inputTensor = [self createInputTensor:tensorType
+                                                dims:dims
+                                              buffer:bufferData
                                         ortAllocator:ortAllocator
                                          allocations:allocatons];
     return inputTensor;
@@ -118,6 +175,65 @@ NSString *const JsTensorTypeString = @"string";
 
   return outputTensorMap;
 }
+
++ (facebook::jsi::Object)createOutputTensorJSI:(facebook::jsi::Runtime &)runtime
+                                        outputNames:(const std::vector<const char *> &)outputNames
+                                        values:(const std::vector<Ort::Value> &)values {
+  if (outputNames.size() != values.size()) {
+    throw facebook::jsi::JSError(runtime, "output name and tensor count mismatched");
+  }
+
+  facebook::jsi::Object outputTensorMap(runtime);
+
+  for (size_t i = 0; i < outputNames.size(); ++i) {
+    const auto outputName = outputNames[i];
+    const Ort::Value &value = values[i];
+
+    if (!value.IsTensor()) {
+      throw facebook::jsi::JSError(runtime, "only tensor type is supported");
+    }
+
+    facebook::jsi::Object outputTensor(runtime);
+
+    // dims
+    auto dims = value.GetTensorTypeAndShapeInfo().GetShape();
+    facebook::jsi::Array outputDims(runtime, dims.size());
+    for (size_t i = 0; i < dims.size(); i++) {
+      // convert to string due to jsi not supported int64_t
+      outputDims.setValueAtIndex(runtime, i, std::to_string(dims[i]));
+    }
+    outputTensor.setProperty(runtime, "dims", std::move(outputDims));
+
+    // type
+    NSString *jsTensorType = [self getJsTensorType:value.GetTensorTypeAndShapeInfo().GetElementType()];
+    outputTensor.setProperty(runtime, "type",
+                             facebook::jsi::String::createFromUtf8(runtime, [jsTensorType UTF8String]));
+
+    // data
+    if (value.GetTensorTypeAndShapeInfo().GetElementType() == ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING) {
+      facebook::jsi::Array buffer(runtime, value.GetTensorTypeAndShapeInfo().GetElementCount());
+      for (size_t i = 0; i < value.GetTensorTypeAndShapeInfo().GetElementCount(); ++i) {
+        size_t elementLength = value.GetStringTensorElementLength(i);
+        std::string element(elementLength, '\0');
+        value.GetStringTensorElement(elementLength, i, (void *)element.data());
+        buffer.setValueAtIndex(runtime, i, facebook::jsi::String::createFromUtf8(runtime, element));
+      }
+      outputTensor.setProperty(runtime, "data", std::move(buffer));
+    } else {
+      NSData *data = [self createOutputTensorJSI:value];
+        // TODO: Use no-copy ArrayBuffer?
+      facebook::jsi::Function arrayBufferCtor = runtime.global().getPropertyAsFunction(runtime, "ArrayBuffer");
+      facebook::jsi::Object o = arrayBufferCtor.callAsConstructor(runtime, (int)data.length).getObject(runtime);
+      facebook::jsi::ArrayBuffer buf = o.getArrayBuffer(runtime);
+      memcpy(buf.data(runtime), data.bytes, data.length);
+      outputTensor.setProperty(runtime, "data", buf);
+    }
+
+    outputTensorMap.setProperty(runtime, outputName, outputTensor);
+  }
+  return outputTensorMap;
+}
+
 
 template <typename T>
 static Ort::Value createInputTensorT(OrtAllocator *ortAllocator, const std::vector<int64_t> &dims, NSData *buffer,
@@ -198,6 +314,53 @@ template <typename T> static NSString *createOutputTensorT(const Ort::Value &ten
     return createOutputTensorT<bool>(tensor);
   case ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE:
     return createOutputTensorT<double_t>(tensor);
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED:
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16:
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING:
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16:
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32:
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64:
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX64:
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_COMPLEX128:
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_BFLOAT16:
+  default: {
+    NSException *exception = [NSException exceptionWithName:@"create output tensor"
+                                                     reason:@"unsupported tensor type"
+                                                   userInfo:nil];
+    @throw exception;
+  }
+  }
+}
+
+
+template <typename T> static NSData *createOutputTensorTJSI(const Ort::Value &tensor) {
+  const auto data = tensor.GetTensorData<T>();
+  NSData *buffer = [NSData dataWithBytesNoCopy:(void *)data
+                                        length:tensor.GetTensorTypeAndShapeInfo().GetElementCount() * sizeof(T)
+                                  freeWhenDone:false];
+  return buffer;
+}
+
++ (NSData *)createOutputTensorJSI:(const Ort::Value &)tensor {
+  ONNXTensorElementDataType tensorType = tensor.GetTensorTypeAndShapeInfo().GetElementType();
+
+  switch (tensorType) {
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:
+    return createOutputTensorTJSI<float_t>(tensor);
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8:
+    return createOutputTensorTJSI<uint8_t>(tensor);
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8:
+    return createOutputTensorTJSI<int8_t>(tensor);
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16:
+    return createOutputTensorTJSI<int16_t>(tensor);
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32:
+    return createOutputTensorTJSI<int32_t>(tensor);
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64:
+    return createOutputTensorTJSI<int64_t>(tensor);
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL:
+    return createOutputTensorTJSI<bool>(tensor);
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE:
+    return createOutputTensorTJSI<double_t>(tensor);
   case ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED:
   case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16:
   case ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING:

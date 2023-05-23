@@ -72,3 +72,5 @@ export declare namespace Binding {
 // export native binding
 const {Onnxruntime} = NativeModules;
 export const binding = Onnxruntime as Binding.InferenceSession;
+
+Onnxruntime.install();
