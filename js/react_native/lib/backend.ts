@@ -138,7 +138,7 @@ class OnnxruntimeSessionHandler implements SessionHandler {
 
         returnValue[key] = {
           // dims: feeds[key].dims,
-          dims: feeds[key].dims.map(dim => String(dim)),
+          dims: feeds[key].dims,
           type: feeds[key].type,
           data,
         };
@@ -162,7 +162,7 @@ class OnnxruntimeSessionHandler implements SessionHandler {
           tensorData = new typedArray(buffer.buffer, buffer.byteOffset, buffer.length / typedArray.BYTES_PER_ELEMENT);
         }
 
-        returnValue[key] = new Tensor(results[key].type as Tensor.Type, tensorData, results[key].dims.map(dim => Number(dim)));
+        returnValue[key] = new Tensor(results[key].type as Tensor.Type, tensorData, results[key].dims);
       }
     }
 

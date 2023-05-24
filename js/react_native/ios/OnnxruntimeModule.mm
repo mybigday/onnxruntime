@@ -198,6 +198,19 @@ RCT_EXPORT_METHOD(run
   return resultMap;
 }
 
+
+//- (facebook::jsi::Object)loadModelImplJSI:(NSString *)modelPath
+//                                    modelData:(NSData *)modelData
+//                                    options:(facebook::jsi::Object)options {
+//  SessionInfo *sessionInfo = nullptr;
+//  sessionInfo = new SessionInfo();
+//
+//  // TODO
+//  // Ort::SessionOptions sessionOptions = [self parseSessionOptionsJSI:options];
+//
+//
+//}
+
 /**
  * Run a model using given uri.
  *
@@ -365,7 +378,15 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install)
 
   auto& runtime = *jsiRuntime;
 
-  auto inferenceRun = jsi::Function::createFromHostFunction(runtime,
+  /**
+    * Run a model using given uri.
+    *
+    * @param url a model path location given at loadModel()
+    * @param input an input tensor
+    * @param output an output names to be returned
+    * @param options onnxruntime run options
+    */
+  auto run = jsi::Function::createFromHostFunction(runtime,
     jsi::PropNameID::forAscii(runtime, "onnxruntimeSessionRun"),
     4,
     [](jsi::Runtime& runtime, const jsi::Value& thisValue, const jsi::Value* args, size_t count) -> jsi::Value {
@@ -429,7 +450,7 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install)
     }
   );
 
-  runtime.global().setProperty(runtime, "__onnxruntimeSessionRun", std::move(inferenceRun));
+  runtime.global().setProperty(runtime, "__onnxruntimeSessionRun", std::move(run));
 
   NSLog(@"Installed ONNXRuntime Bindings!");
   return @true;

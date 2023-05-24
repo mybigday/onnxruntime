@@ -76,8 +76,8 @@ NSString *const JsTensorTypeString = @"string";
   std::vector<int64_t> dims;
   dims.reserve(dimsArray.size(runtime));
   for (size_t i = 0; i < dimsArray.size(runtime); i++) {
-    auto dim = dimsArray.getValueAtIndex(runtime, i).asString(runtime).utf8(runtime);
-    dims.emplace_back(std::stoll(dim));
+    auto dim = dimsArray.getValueAtIndex(runtime, i).asNumber();
+    dims.emplace_back(dim);
   }
 
   // type
@@ -199,8 +199,8 @@ NSString *const JsTensorTypeString = @"string";
     auto dims = value.GetTensorTypeAndShapeInfo().GetShape();
     facebook::jsi::Array outputDims(runtime, dims.size());
     for (size_t i = 0; i < dims.size(); i++) {
-      // convert to string due to jsi not supported int64_t
-      outputDims.setValueAtIndex(runtime, i, std::to_string(dims[i]));
+      // NOTE: onnxruntime-common js only supported safe integer dim
+      outputDims.setValueAtIndex(runtime, i, (int) dims[i]);
     }
     outputTensor.setProperty(runtime, "dims", std::move(outputDims));
 
