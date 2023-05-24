@@ -109,10 +109,10 @@ class OnnxruntimeSessionHandler implements SessionHandler {
     }
     let t0 = performance.now()
     const input = this.encodeFeedsType(feeds);
-    // const results: Binding.ReturnType = await this.#inferenceSession.run(this.#key, input, outputNames, options)
     console.log('input', performance.now() - t0)
     t0 = performance.now()
-    const results: Binding.ReturnType = await global.__onnxruntimeSessionRun(this.#key, input, outputNames, options);
+    const results: Binding.ReturnType = await this.#inferenceSession.run(this.#key, input, outputNames, options)
+    // const results: Binding.ReturnType = await global.__onnxruntimeSessionRun(this.#key, input, outputNames, options);
     console.log('run', performance.now() - t0)
     t0 = performance.now()
     const output = this.decodeReturnType(results);

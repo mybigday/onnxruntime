@@ -18,9 +18,11 @@ Pod::Spec.new do |spec|
   spec.platforms            = { :ios => "12.4" }
   spec.source               = { :git => "https://github.com/Microsoft/onnxruntime.git", :tag => "rel-#{spec.version}" }
 
-  spec.source_files         = "ios/*.{h,mm}"
+  spec.source_files         = "ios/*.{h,mm}", "cpp/*.{h,cpp}"
 
   spec.dependency "React-Core"
+  spec.dependency "React-callinvoker"
+  spec.dependency "ReactCommon/turbomodule/core"
   spec.dependency "onnxruntime-c"
 
   spec.xcconfig = {

@@ -7,7 +7,11 @@
 #import <Foundation/Foundation.h>
 #import <React/RCTLog.h>
 #import <React/RCTBridge+Private.h>
+#import <React/RCTUtils.h>
+#import <ReactCommon/RCTTurboModule.h>
 #import <jsi/jsi.h>
+
+#import "ThreadPool.h"
 
 // Note: Using below syntax for including ort c api and ort extensions headers to resolve a compiling error happened
 // in an expo react native ios app when ort extensions enabled (a redefinition error of multiple object types defined
@@ -377,6 +381,8 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install)
   }
 
   auto& runtime = *jsiRuntime;
+  auto pool = std::make_shared<ThreadPool>();
+  auto callInvoker = bridge.jsCallInvoker;
 
   /**
     * Run a model using given uri.
@@ -389,64 +395,87 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(install)
   auto run = jsi::Function::createFromHostFunction(runtime,
     jsi::PropNameID::forAscii(runtime, "onnxruntimeSessionRun"),
     4,
-    [](jsi::Runtime& runtime, const jsi::Value& thisValue, const jsi::Value* args, size_t count) -> jsi::Value {
+    [pool, callInvoker](jsi::Runtime& runtime, const jsi::Value& thisValue, const jsi::Value* args, size_t count) -> jsi::Value {
       if (count != 4) {
         throw jsi::JSError(runtime, "onnxruntimeSessionRun: Invalid number of args");
       }
 
-      auto url = args[0].getString(runtime).utf8(runtime);
-      auto input = args[1].asObject(runtime);
-      auto output = args[2].asObject(runtime).asArray(runtime);
-      auto options = args[3].asObject(runtime);
+      auto promise = runtime.global().getPropertyAsFunction(runtime, "Promise");
+      return promise.callAsConstructor(runtime, jsi::Function::createFromHostFunction(runtime,
+        jsi::PropNameID::forAscii(runtime, "executor"),
+        2,
+        [args, pool, callInvoker](jsi::Runtime &runtime, const jsi::Value &thisValue, const jsi::Value *pargs, size_t) -> jsi::Value
+      {
+        auto resolve = std::make_shared<jsi::Value>(runtime, pargs[0]);
+        auto reject = std::make_shared<jsi::Value>(runtime, pargs[1]);
 
-      NSString *urlString = [NSString stringWithUTF8String:url.c_str()];
-      NSValue *value = [sessionMap objectForKey:urlString];
-      if (value == nil) {
-        throw jsi::JSError(runtime, "onnxruntimeSessionRun: can't find onnxruntime session");
-      }
-      SessionInfo *sessionInfo = (SessionInfo *)[value pointerValue];
+        auto url = args[0].getString(runtime).utf8(runtime);
+        auto input = args[1].asObject(runtime);
+        auto output = std::make_shared<jsi::Array>(args[2].asObject(runtime).asArray(runtime));
+        auto options = args[3].asObject(runtime);
 
-      std::vector<Ort::Value> feeds;
-      std::vector<Ort::MemoryAllocation> allocations;
-      feeds.reserve(sessionInfo->inputNames.size());
-      for (auto inputName : sessionInfo->inputNames) {
-        auto inputTensorProp = input.getProperty(runtime, inputName);
-        if (inputTensorProp.isUndefined()) {
-          throw jsi::JSError(runtime, "onnxInferenceRun: Invalid input tensor");
+        NSString *urlString = [NSString stringWithUTF8String:url.c_str()];
+        NSValue *value = [sessionMap objectForKey:urlString];
+        if (value == nil) {
+          throw jsi::JSError(runtime, "onnxruntimeSessionRun: can't find onnxruntime session");
         }
-        auto inputTensor = inputTensorProp.asObject(runtime);
+        SessionInfo *sessionInfo = (SessionInfo *)[value pointerValue];
 
-        Ort::Value value = [TensorHelper createInputTensorJSI:runtime input:&inputTensor ortAllocator:ortAllocator allocations:allocations];
-        feeds.emplace_back(std::move(value));
-      }
+        auto feeds = std::make_shared<std::vector<Ort::Value>>();
+        std::vector<Ort::MemoryAllocation> allocations;
+        feeds->reserve(sessionInfo->inputNames.size());
+        for (auto inputName : sessionInfo->inputNames) {
+          auto inputTensorProp = input.getProperty(runtime, inputName);
+          if (inputTensorProp.isUndefined()) {
+            throw jsi::JSError(runtime, "onnxInferenceRun: Invalid input tensor");
+          }
+          auto inputTensor = inputTensorProp.asObject(runtime);
 
-      std::vector<const char *> requestedOutputs;
-      long outputCount = output.size(runtime);
-      requestedOutputs.reserve(outputCount);
-      for (int i = 0; i < outputCount; i++) {
-        auto outputName = output.getValueAtIndex(runtime, i).asString(runtime).utf8(runtime);
-        NSString *outputNameString = [NSString stringWithUTF8String:outputName.c_str()];
-        requestedOutputs.emplace_back([outputNameString UTF8String]);
-      }
+          Ort::Value value = [TensorHelper createInputTensorJSI:runtime input:&inputTensor ortAllocator:ortAllocator allocations:allocations];
+          feeds->emplace_back(std::move(value));
+        }
 
-      // Parse run options
-      Ort::RunOptions runOptions;
-      if (options.hasProperty(runtime, "logSeverityLevel")) {
-        int logSeverityLevel = options.getProperty(runtime, "logSeverityLevel").asNumber();
-        runOptions.SetRunLogSeverityLevel(logSeverityLevel);
-      }
-      if (options.hasProperty(runtime, "tag")) {
-        auto tag = options.getProperty(runtime, "tag").asString(runtime).utf8(runtime);
-        runOptions.SetRunTag(tag.c_str());
-      }
+        auto requestedOutputs = std::make_shared<std::vector<const char *>>();
+        long outputCount = output->size(runtime);
+        requestedOutputs->reserve(outputCount);
+        for (int i = 0; i < outputCount; i++) {
+          auto outputName = output->getValueAtIndex(runtime, i).asString(runtime).utf8(runtime);
+          NSString *outputNameString = [NSString stringWithUTF8String:outputName.c_str()];
+          requestedOutputs->emplace_back([outputNameString UTF8String]);
+        }
 
-      auto result =
-          sessionInfo->session->Run(runOptions, sessionInfo->inputNames.data(), feeds.data(),
-                                    sessionInfo->inputNames.size(), requestedOutputs.data(), requestedOutputs.size());
+        // Parse run options
+        auto runOptions = std::make_shared<Ort::RunOptions>();
+        if (options.hasProperty(runtime, "logSeverityLevel")) {
+          int logSeverityLevel = options.getProperty(runtime, "logSeverityLevel").asNumber();
+          runOptions->SetRunLogSeverityLevel(logSeverityLevel);
+        }
+        if (options.hasProperty(runtime, "tag")) {
+          auto tag = options.getProperty(runtime, "tag").asString(runtime).utf8(runtime);
+          runOptions->SetRunTag(tag.c_str());
+        }
 
-      facebook::jsi::Object resultMap = [TensorHelper createOutputTensorJSI:runtime outputNames:requestedOutputs values:result];
+        pool->queueWork([callInvoker, &runtime, output, runOptions, sessionInfo, feeds, requestedOutputs, resolve, reject]() {
+          auto result =
+            sessionInfo->session->Run(*runOptions, sessionInfo->inputNames.data(), feeds->data(),
+                                      sessionInfo->inputNames.size(), requestedOutputs->data(), requestedOutputs->size());
 
-      return resultMap;
+          auto resultPtr = std::make_shared<std::vector<Ort::Value>>(std::move(result));
+          callInvoker->invokeAsync([&runtime, output, resultPtr, resolve]{
+            auto requestedOutputs = std::make_shared<std::vector<const char *>>();
+            long outputCount = output->asArray(runtime).size(runtime);
+            requestedOutputs->reserve(outputCount);
+            for (int i = 0; i < outputCount; i++) {
+              auto outputName = output->getValueAtIndex(runtime, i).asString(runtime).utf8(runtime);
+              NSString *outputNameString = [NSString stringWithUTF8String:outputName.c_str()];
+              requestedOutputs->emplace_back([outputNameString UTF8String]);
+            }
+            facebook::jsi::Object resultMap = [TensorHelper createOutputTensorJSI:runtime outputNames:*requestedOutputs values:*resultPtr];
+            resolve->asObject(runtime).asFunction(runtime).call(runtime, std::move(resultMap));
+          });
+        });
+        return {};
+      }));
     }
   );
 
