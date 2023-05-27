@@ -38,7 +38,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "source": "lib/index",
-  "version": "1.16.0",
+  "version": "1.16.0-test5",
   "main": "dist/commonjs/index",
   "homepage": "https://github.com/microsoft/onnxruntime/blob/main/js/react_native/README.md",
   "files": [
@@ -79,14 +79,14 @@
   "dependencies": {
     "@expo/config-plugins": "^4.1.5",
     "buffer": "^6.0.3",
-    "onnxruntime-common": "file:../common"
+    "@fugood/onnxruntime-common": "~1.16.0-test"
   },
   "scripts": {
     "typescript": "tsc --noEmit",
     "prepare": "bob build",
     "bootstrap": "yarn pack-common && yarn unpack-common && yarn pack-libs && yarn unpack-libs && yarn e2e && yarn pods",
     "test": "jest",
-    "pack-common": "cd ../common && npm pack && mv -f onnxruntime-common-*.tgz ../react_native/e2e/onnxruntime-common.tgz",
+    "pack-common": "cd ../common && npm pack && mv -f fugood-onnxruntime-common-*.tgz ../react_native/e2e/onnxruntime-common.tgz",
     "unpack-common": "cd e2e && yarn add --no-lockfile file:./onnxruntime-common.tgz",
     "pack-libs": "npm pack --ort-js-pack-mode=e2e && mv -f onnxruntime-react-native-*.tgz e2e/onnxruntime-react-native.tgz",
     "unpack-libs": "cd e2e && yarn add --no-lockfile file:./onnxruntime-react-native.tgz",
@@ -95,7 +95,7 @@
     "e2e": "yarn --cwd e2e"
   },
   "types": "dist/typescript/index.d.ts",
-  "name": "onnxruntime-react-native",
+  "name": "@fugood/onnxruntime-react-native",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/Microsoft/onnxruntime/issues"
