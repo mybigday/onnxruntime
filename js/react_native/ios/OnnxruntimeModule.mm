@@ -6,6 +6,8 @@
 
 #import <Foundation/Foundation.h>
 #import <React/RCTLog.h>
+#import <React/RCTBridge+Private.h>
+#import <React/RCTBlobManager.h>
 
 // Note: Using below syntax for including ort c api and ort extensions headers to resolve a compiling error happened
 // in an expo react native ios app when ort extensions enabled (a redefinition error of multiple object types defined
@@ -44,6 +46,18 @@ static int nextSessionId = 0;
 
 RCT_EXPORT_MODULE(Onnxruntime)
 
+RCTBlobManager *blobManager = nil;
+
+- (void)checkBlobManager {
+  if (blobManager == nil) {
+    blobManager = [[RCTBridge currentBridge] moduleForClass:RCTBlobManager.class];
+  }
+}
+
+- (void)setBlobManager:(RCTBlobManager *)manager {
+  blobManager = manager;
+}
+
 /**
  * React native binding API to load a model using given uri.
  *
@@ -76,14 +90,19 @@ RCT_EXPORT_METHOD(loadModel
  * @param reject callback for returning an error back to react native js
  * @note when run() is called, the same modelPath must be passed into the first parameter.
  */
-RCT_EXPORT_METHOD(loadModelFromBase64EncodedBuffer
-                  : (NSString *)modelDataBase64EncodedString options
+RCT_EXPORT_METHOD(loadModelFromBlob
+                  : (NSDictionary *)modelDataBlob options
                   : (NSDictionary *)options resolver
                   : (RCTPromiseResolveBlock)resolve rejecter
                   : (RCTPromiseRejectBlock)reject) {
   @try {
-    NSData *modelDataDecoded = [[NSData alloc] initWithBase64EncodedString:modelDataBase64EncodedString options:0];
-    NSDictionary *resultMap = [self loadModelFromBuffer:modelDataDecoded options:options];
+    [self checkBlobManager];
+    NSString *blobId = [modelDataBlob objectForKey:@"blobId"];
+    long size = [[modelDataBlob objectForKey:@"size"] longValue];
+    long offset = [[modelDataBlob objectForKey:@"offset"] longValue];
+    auto modelData = [blobManager resolve:blobId offset:offset size:size];
+    NSDictionary *resultMap = [self loadModelFromBuffer:modelData options:options];
+    [blobManager remove:blobId];
     resolve(resultMap);
   } @catch (...) {
     reject(@"onnxruntime", @"failed to load model from buffer", nil);
@@ -255,6 +274,8 @@ RCT_EXPORT_METHOD(run
   }
   SessionInfo *sessionInfo = (SessionInfo *)[value pointerValue];
 
+  [self checkBlobManager];
+
   std::vector<Ort::Value> feeds;
   std::vector<Ort::MemoryAllocation> allocations;
   feeds.reserve(sessionInfo->inputNames.size());
@@ -265,7 +286,7 @@ RCT_EXPORT_METHOD(run
       @throw exception;
     }
 
-    Ort::Value value = [TensorHelper createInputTensor:inputTensor ortAllocator:ortAllocator allocations:allocations];
+    Ort::Value value = [TensorHelper createInputTensor:blobManager input:inputTensor ortAllocator:ortAllocator allocations:allocations];
     feeds.emplace_back(std::move(value));
   }
 
@@ -280,7 +301,7 @@ RCT_EXPORT_METHOD(run
       sessionInfo->session->Run(runOptions, sessionInfo->inputNames.data(), feeds.data(),
                                 sessionInfo->inputNames.size(), requestedOutputs.data(), requestedOutputs.size());
 
-  NSDictionary *resultMap = [TensorHelper createOutputTensor:requestedOutputs values:result];
+  NSDictionary *resultMap = [TensorHelper createOutputTensor:blobManager outputNames:requestedOutputs values:result];
 
   return resultMap;
 }
@@ -378,6 +399,7 @@ static NSDictionary *executionModeTable = @{@"sequential" : @(ORT_SEQUENTIAL), @
   while (NSString *key = [iterator nextObject]) {
     [self dispose:key];
   }
+  blobManager = nullptr;
 }
 
 @end
