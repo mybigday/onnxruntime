@@ -1,11 +1,8 @@
 package ai.onnxruntime.reactnative;
 
-import android.util.Log;
-
 import androidx.annotation.NonNull;
 
 import com.facebook.react.bridge.JavaScriptContextHolder;
-import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
@@ -33,6 +30,9 @@ public class OnnxruntimeJSIHelper extends ReactContextBaseJavaModule {
   public void checkBlobModule() {
     if (blobModule == null) {
       blobModule = getReactApplicationContext().getNativeModule(BlobModule.class);
+      if (blobModule == null) {
+        throw new RuntimeException("BlobModule is not initialized");
+      }
     }
   }
 

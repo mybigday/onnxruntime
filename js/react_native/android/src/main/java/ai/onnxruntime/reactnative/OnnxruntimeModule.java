@@ -13,7 +13,6 @@ import ai.onnxruntime.OrtSession.RunOptions;
 import ai.onnxruntime.OrtSession.SessionOptions;
 import android.net.Uri;
 import android.os.Build;
-import android.util.Base64;
 import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
@@ -73,6 +72,9 @@ public class OnnxruntimeModule extends ReactContextBaseJavaModule implements Lif
   public void checkBlobModule() {
     if (blobModule == null) {
       blobModule = getReactApplicationContext().getNativeModule(BlobModule.class);
+      if (blobModule == null) {
+        throw new RuntimeException("BlobModule is not initialized");
+      }
     }
   }
 
@@ -96,9 +98,9 @@ public class OnnxruntimeModule extends ReactContextBaseJavaModule implements Lif
   }
 
   /**
-   * React native binding API to load a model using blob map that data stored in BlobModule.
+   * React native binding API to load a model using blob object that data stored in BlobModule.
    *
-   * @param data the blob map
+   * @param data the blob object
    * @param options onnxruntime session options
    * @param promise output returning back to react native js
    * @note the value provided to `promise` includes a key representing the session.

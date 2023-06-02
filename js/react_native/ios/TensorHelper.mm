@@ -21,12 +21,12 @@ NSString *const JsTensorTypeString = @"string";
 
 /**
  * It creates an input tensor from a map passed by react native js.
- * 'data' must be a string type as data is encoded as base64. It first decodes it and creates a tensor.
+ * 'data' is blob object and the buffer is stored in RCTBlobManager. It first resolve it and creates a tensor.
  */
 + (Ort::Value)createInputTensor:(RCTBlobManager *)blobManager
                           input:(NSDictionary *)input
                    ortAllocator:(OrtAllocator *)ortAllocator
-                    allocations:(std::vector<Ort::MemoryAllocation> &)allocatons {
+                    allocations:(std::vector<Ort::MemoryAllocation> &)allocations {
   // shape
   NSArray *dimsArray = [input objectForKey:@"dims"];
   std::vector<int64_t> dims;
@@ -58,7 +58,7 @@ NSString *const JsTensorTypeString = @"string";
                                                 dims:dims
                                               buffer:buffer
                                         ortAllocator:ortAllocator
-                                         allocations:allocatons];
+                                         allocations:allocations];
     [blobManager remove:blobId];
     return inputTensor;
   }
@@ -66,7 +66,7 @@ NSString *const JsTensorTypeString = @"string";
 
 /**
  * It creates an output map from an output tensor.
- * a data array is encoded as base64 string.
+ * a data array is store in RCTBlobManager.
  */
 + (NSDictionary *)createOutputTensor:(RCTBlobManager *)blobManager
                          outputNames:(const std::vector<const char *> &)outputNames
