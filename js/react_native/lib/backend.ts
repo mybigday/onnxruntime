@@ -1,7 +1,11 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+<<<<<<< HEAD
 import {Backend, InferenceSession, SessionHandler, Tensor,} from '@fugood/onnxruntime-common';
+=======
+import {Backend, InferenceSession, SessionHandler, Tensor,} from 'onnxruntime-common';
+>>>>>>> main
 import {Platform} from 'react-native';
 
 import {binding, Binding, JSIBlob, jsiHelper} from './binding';
@@ -123,7 +127,7 @@ class OnnxruntimeSessionHandler implements SessionHandler {
           data = feeds[key].data as string[];
         } else {
           const buffer = (feeds[key].data as SupportedTypedArray).buffer;
-          data = jsiHelper.storeArrayBuffer(buffer) as JSIBlob;
+          data = jsiHelper.storeArrayBuffer(buffer);
         }
 
         returnValue[key] = {
