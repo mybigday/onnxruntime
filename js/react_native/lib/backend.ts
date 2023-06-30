@@ -1,11 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-<<<<<<< HEAD
 import {Backend, InferenceSession, SessionHandler, Tensor,} from '@fugood/onnxruntime-common';
-=======
-import {Backend, InferenceSession, SessionHandler, Tensor,} from 'onnxruntime-common';
->>>>>>> main
 import {Platform} from 'react-native';
 
 import {binding, Binding, JSIBlob, jsiHelper} from './binding';
